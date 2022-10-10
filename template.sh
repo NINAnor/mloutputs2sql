@@ -1,0 +1,8 @@
+#!/bin/bash
+
+BASE_FOLDER=/PATH/TO/RESULTS
+DB_NAME=/PATH/TO/STORE/database.db
+IS_PREFIX=True
+INDEX_LOCATION=-3
+
+./mloutput2sql/mloutput2sql.sh $BASE_FOLDER $DB_NAME $IS_PREFIX $INDEX_LOCATION
