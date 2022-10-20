@@ -2,8 +2,9 @@ import argparse
 import pandas
 import re
 import datetime
-
 import sqlalchemy
+
+from tqdm import tqdm
 
 recorder_filename_date = re.compile(r"\d{8}_\d{6}.csv")
 
@@ -41,7 +42,6 @@ def add_time_detection(item, dt):
 
     item["time_detection"] = [dt + datetime.timedelta(seconds=s) for s in item["start_detection"]]
     item["time_detection"] = [i.strftime('%H:%M:%S') for i in item["time_detection"]]
-    print(item)
     return item
     
 def add_info(filename, parsed, prefix, index_location_folder, dt):
@@ -58,11 +58,15 @@ def main(database_path, recreate, results, prefix, index_location_folder):
 
     db = sqlalchemy.create_engine('sqlite:///{}'.format(database_path))
 
-    for result in results:
-        dt = filename_to_datetime(result)
-        parsed = pandas.read_csv(result)    
-        improved = add_info(result, parsed, prefix, index_location_folder, dt)
-        improved.to_sql(database_path, db, if_exists="append")
+    for result in tqdm(results):
+        try:
+            dt = filename_to_datetime(result)
+            parsed = pandas.read_csv(result)    
+            improved = add_info(result, parsed, prefix, index_location_folder, dt)
+            improved.to_sql(database_path, db, if_exists="append")
+        except:
+            print(f"Could not analyse {result}")
+            continue
         
 if __name__ == "__main__":
     
