@@ -8,6 +8,29 @@ from tqdm import tqdm
 
 recorder_filename_date = re.compile(r"\d{8}_\d{6}.csv")
 
+def aggregate(item):
+    item['continuation'] = (item.filename == item.filename.shift()) & (item.end_detection.shift() == item.start_detection)
+    item['keep'] = ~item.continuation.shift(-1).astype(bool)
+    item.at[item.index[-1], 'keep'] = True
+    item.start_detection = item.start_detection[~item.continuation]
+    item.start_detection = item.start_detection.fillna(method="ffill").astype(int)
+
+    item["start_shift"] = item["start_detection"].shift()
+    item["cumsum"] = (item["start_detection"] != item["start_shift"]).cumsum()
+
+    # Aggregate conference
+    item["conf_agg"] = item.groupby("cumsum")['confidence'].transform('mean')
+
+    # Aggregate HR
+    item["hr_agg"] = item.groupby("cumsum")['hr'].transform('mean')
+
+    # Keep what we need
+    item_agg = (item[item.keep]
+        .assign(duration=item.end_detection - item.start_detection)
+        .drop(columns=['continuation', 'keep', 'confidence', 'hr', 'cumsum', 'start_shift']).reset_index(drop=True))
+
+    return item_agg
+
 def filename_to_datetime(filename):
     matches = recorder_filename_date.search(filename)
     if not matches:
@@ -23,14 +46,8 @@ def add_location(item, filename, index_location_folder):
     item["location"] = location
     return item
         
-def add_prefix(item, filename):
-    prefix = filename.split('/')[-1].split('_')[0]
-    item["prefix"] = prefix
-    return item
-        
 def add_filename(item, filename):
-    file_name = filename.split('/')[-1].split('.')[0]
-    item["filename"] = file_name
+    item["filename"] = filename
     return item   
     
 def add_date(item, dt):
@@ -44,17 +61,16 @@ def add_time_detection(item, dt):
     item["time_detection"] = [i.strftime('%H:%M:%S') for i in item["time_detection"]]
     return item
     
-def add_info(filename, parsed, prefix, index_location_folder, dt):
+def add_info(filename, parsed, index_location_folder, dt):
 
-    improved = add_date(parsed, dt)
-    improved = add_location(parsed, filename, index_location_folder)
-    improved = add_time_detection(parsed, dt)
-    if prefix:
-        improved = add_prefix(parsed, filename)
     improved = add_filename(parsed, filename)
+    improved = aggregate(improved)
+    improved = add_date(improved, dt)
+    improved = add_location(improved, filename, index_location_folder)
+    improved = add_time_detection(improved, dt)
     return improved
 
-def main(database_path, recreate, results, prefix, index_location_folder):
+def main(database_path, recreate, results, index_location_folder):
 
     db = sqlalchemy.create_engine('sqlite:///{}'.format(database_path))
 
@@ -62,7 +78,7 @@ def main(database_path, recreate, results, prefix, index_location_folder):
         try:
             dt = filename_to_datetime(result)
             parsed = pandas.read_csv(result)    
-            improved = add_info(result, parsed, prefix, index_location_folder, dt)
+            improved = add_info(result, parsed, index_location_folder, dt)
             improved.to_sql(database_path, db, if_exists="append")
         except:
             print(f"Could not analyse {result}")
@@ -78,11 +94,6 @@ if __name__ == "__main__":
         "--database_path",
         help="Path of the database to create or update",
         default="common.sqlite",
-    )
-    parser.add_argument(
-        "--prefix",
-        help="Does the file name has a prefix before HMS_YMD",
-        default=False,
     )
     parser.add_argument(
         "--index_location_folder",
@@ -102,5 +113,5 @@ if __name__ == "__main__":
         help="BirdNet result file",
     )
     args = parser.parse_args()
-    main(args.database_path, args.recreate, args.results, args.prefix, args.index_location_folder)
+    main(args.database_path, args.recreate, args.results, args.index_location_folder)
 
